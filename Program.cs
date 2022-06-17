@@ -1,25 +1,26 @@
-﻿using System;
-using System.Net;
-using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Threading.Tasks;
+﻿using System.Net.Http.Headers;
 using System.Text.Json;
-using System.Collections.Generic;
 using System.Text;
 using Client.Repositories;
+using System.Globalization;
+using CsvHelper.Configuration;
+using CsvHelper;
 
 namespace Client
 {
     public class Program
     {
-        private static readonly string _baseUrl = "http://localhost:9009/movies";
+        private static readonly string _baseUrl = "https://localhost:7115/api/records";//"http://localhost:9009/movies";
         private static readonly HttpClient client = new HttpClient();
+        private static List<Record> records = new List<Record>();
+
         public static async Task Main(string[] args)
         {
-            Console.WriteLine("Hello, Hubber!");
+            Console.WriteLine("Hello, Checkr!");
 
-            // await ProcessRepositories();
+
             IngestAndPostData();
+            await ProcessRepositories();
 
             Console.ReadLine();
         }
@@ -27,88 +28,119 @@ namespace Client
 
         public static void IngestAndPostData()
         {
+            var configuration = new CsvConfiguration(CultureInfo.InvariantCulture)
+            {
+                HasHeaderRecord = false,
+                //Delimiter = ",",
+                // Comment = '%'
+            };
+
+            using (var reader = new StreamReader("data/chkr.csv"))
+            using (var csv = new CsvReader(reader, configuration))
+            {
+                records = csv.GetRecords<Record>().ToList();
+            }
 
             client.DefaultRequestHeaders.Accept.Clear();
             client.DefaultRequestHeaders.Accept.Add(
                 new MediaTypeWithQualityHeaderValue("application/json"));
 
-            StreamReader streamReader = new StreamReader("movies.json");
-            var json = streamReader.ReadToEnd();
-
-            var movieList = JsonSerializer.Deserialize<List<Movies>>(json);
-
-            foreach (var movie in movieList)
+            foreach (var rec in records)
             {
-                client.PostAsync(_baseUrl, CreateHttpContent(movie));
+                Console.WriteLine(rec.actor);
+                client.PostAsync(_baseUrl, CreateHttpContent(rec));
             }
+
+
+            /*
+                StreamReader streamReader = new StreamReader("movies.json");
+                var json = streamReader.ReadToEnd();
+
+                var movieList = JsonSerializer.Deserialize<List<Movies>>(json);
+
+                foreach (var movie in movieList)
+                {
+                    client.PostAsync(_baseUrl, CreateHttpContent(movie));
+                }
+            */
         }
 
-        /*
+        
         private static async Task ProcessRepositories()
         {
-            client.DefaultRequestHeaders.Accept.Clear();
-            client.DefaultRequestHeaders.Accept.Add(
-                new MediaTypeWithQualityHeaderValue("application/json"));
-
-
-
             //var streamTask = client.GetStreamAsync(_baseUrl);
             //var repositories = await JsonSerializer.DeserializeAsync<List<ContactRepository>>(await streamTask);
             
             try
             {
-                Console.WriteLine("Processing Repositories...");
+                Console.WriteLine("\nProcessing Repositories...");
 
-                ContactRepository contact1 = new ContactRepository
+                Record record1 = new Record
                 {
-                    Name = "Zillah",
-                    PhoneNumber = "218999768",
-                    Email = "zillahada@swe.com"
+                    year= 1983,
+                    length = 104,
+                    title= "Dead Zone, The",
+                    subject= "Horror",
+                    actor= "Walken, Christopher",
+                    actress= "Adams, Brooke",
+                    director= "Cronenberg, David",
+                    popularity = 79,
+                    awards = false,
+                    image = "NicholasCage.png"
                 };
 
-                ContactRepository contact2 = new ContactRepository
+                Record record2 = new Record
                 {
-                    Name = "Zahra",
-                    PhoneNumber = "412999768",
-                    Email = "zahraada@dataeng.com"
+                    year = 1979,
+                    length = 122,
+                    title = "Cuba",
+                    subject = "Action",
+                    actor = "Connery, Sean",
+                    actress = "Adams, Brooke",
+                    director = "Lester, Richard",
+                    popularity = 6,
+                    awards = false,
+                    image = "seanConnery.png"
                 };
 
                 Console.WriteLine();
 
-                var url = await CreateContact(contact1);
-                Console.WriteLine($"Created {nameof(contact1)} at {url}");
+                var url = await Create(record1);
+                Console.WriteLine($"Created {nameof(record1)} at {url}");
 
-                var contactOneId = url.Segments.Last();
-                var getContact = await GetContactAsync(contactOneId);
-                DisplayContact(getContact);
+                var recordOneId = url.Segments.Last();
+                Console.WriteLine("rec " + recordOneId);
+                var getRecord = await GetAsync(recordOneId);
+                Display(getRecord);
 
-                getContact.PhoneNumber = "2189797441";
-                var updateContact = await UpdateContactAsync(getContact);
+                getRecord.year = 1904;
+                var updateRecord = await UpdateAsync(getRecord);
 
-                var isUpdated = (updateContact.PhoneNumber == contact1.PhoneNumber) ? "No" : "Yes";
-                Console.WriteLine($"Has Contact Phone Number changed? {isUpdated}");
+                var isUpdated = (updateRecord.year == record1.year) ? "No" : "Yes";
+                Console.WriteLine($"Has record changed? {isUpdated}");
 
-                Console.WriteLine("Adding another contact");
-                url = await CreateContact(contact2);
-                Console.WriteLine($"Created {nameof(contact2)} at {url}");
+                Console.WriteLine("Adding another record");
+                url = await Create(record2);
+                Console.WriteLine($"Created {nameof(record2)} at {url}");
 
-                Console.WriteLine("Displaying All Contacts");
-                var allContacts = await GetAllContactsAsync();
+                Console.WriteLine("\nDisplaying All Records");
+                var allRecords = await GetAllAsync();
 
-                foreach(var contact in allContacts)
+                foreach(var record in allRecords)
                 {
-                    DisplayContact(contact);
+                    Display(record);
                 }
 
-                Console.WriteLine("Deleting first contact");
-                DeleteContactAsync(contactOneId);
+                Console.WriteLine("Deleting first record");
+                var isDeleted = await DeleteAsync(recordOneId);
+                Console.WriteLine($"Has record been deleted? {isDeleted}");
 
-                Console.WriteLine("Displaying All Contacts after delete");
-                allContacts = await GetAllContactsAsync();
+                Console.WriteLine("\nDisplaying All Records after delete");
+                allRecords = await GetAllAsync();
 
-                foreach (var contact in allContacts)
+                foreach (var record in allRecords)
                 {
-                    DisplayContact(contact);
+                    Display(record);
                 }
 
                 Console.WriteLine("Completed Processing Repositories.");
@@ -120,67 +152,68 @@ namespace Client
         }
 
         
-        static async Task<Uri> CreateContact(ContactRepository contact)
+        static async Task<Uri> Create(Record record)
         {
             HttpResponseMessage response = await client.PostAsync(
-                   _baseUrl, CreateHttpContent(contact));
+                   _baseUrl, CreateHttpContent(record));
             response.EnsureSuccessStatusCode();
 
             return response.Headers.Location;
         }
 
-        static async Task<List<ContactRepository>> GetAllContactsAsync()
+        static async Task<List<Record>> GetAllAsync()
         {
             var streamTask = await client.GetAsync(_baseUrl);
             streamTask.EnsureSuccessStatusCode();
 
-            var results = JsonSerializer.DeserializeAsync<List<ContactRepository>>(await streamTask.Content.ReadAsStreamAsync());
+            var results = JsonSerializer.DeserializeAsync<List<Record>>(await streamTask.Content.ReadAsStreamAsync());
 
             return results.Result;
         }
 
-        static async Task<ContactRepository> GetContactAsync(string id)
+        static async Task<Record> GetAsync(string id)
         {
             var url = $"{_baseUrl}/{id}";
 
             var streamTask = await client.GetAsync(url);
             streamTask.EnsureSuccessStatusCode();
 
-            var results = JsonSerializer.Deserialize<ContactRepository>(streamTask.Content.ReadAsStringAsync().Result);
+            var results = JsonSerializer.Deserialize<Record>(streamTask.Content.ReadAsStringAsync().Result);
 
             if (results == null)
-                return new ContactRepository();
+                return new Record();
             else return results;
         }
 
-        static async Task<ContactRepository> UpdateContactAsync(ContactRepository contact)
+        static async Task<Record> UpdateAsync(Record record)
         {
-            var url = $"{_baseUrl}/{contact.Id}";
+            var url = $"{_baseUrl}/{record.id}";
 
-            var response = await client.PutAsync(url, CreateHttpContent(contact));
+            var response = await client.PutAsync(url, CreateHttpContent(record));
             response.EnsureSuccessStatusCode();
 
-            return await GetContactAsync(contact.Id.ToString());
+            return await GetAsync(record.id.ToString());
         }
 
-        static async void DeleteContactAsync(string id)
+        static async Task<bool> DeleteAsync(string id)
         {
             var url = $"{_baseUrl}/{id}";
             var deleteTask = await client.DeleteAsync(url);
             deleteTask.EnsureSuccessStatusCode();
+            return deleteTask.IsSuccessStatusCode ? true : false;
         }
 
-        private static void DisplayContact(ContactRepository contact)
+        private static void Display(Record record)
         {
             Console.WriteLine();
-            Console.WriteLine($"Name: {contact.Name}\tPhone Number: " +
-                $"{contact.PhoneNumber}\tEmail: {contact.Email}");
+            Console.WriteLine($"Year: {record.year}\tActor: " +
+                $"{record.actor}\tTitle: {record.title}");
         }
-        */
-        private static StringContent CreateHttpContent(Movies contact)
+        
+        private static StringContent CreateHttpContent(Record record)
         {
-            var companySerialized = JsonSerializer.Serialize(contact);
-            return new StringContent(companySerialized, Encoding.UTF8, "application/json");
+            var recordSerialized = JsonSerializer.Serialize(record);
+            return new StringContent(recordSerialized, Encoding.UTF8, "application/json");
         }
 
     }
